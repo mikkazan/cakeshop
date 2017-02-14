@@ -8,6 +8,7 @@ import com.jpmorgan.cakeshop.dao.PeerDAO;
 import com.jpmorgan.cakeshop.error.APIException;
 import com.jpmorgan.cakeshop.model.Node;
 import com.jpmorgan.cakeshop.model.NodeConfig;
+import com.jpmorgan.cakeshop.model.NodeSettings;
 import com.jpmorgan.cakeshop.model.Peer;
 import com.jpmorgan.cakeshop.service.GethHttpService;
 import com.jpmorgan.cakeshop.service.GethRpcConstants;
@@ -76,7 +77,7 @@ public class NodeServiceImpl implements NodeService, GethRpcConstants {
                     URI uri = new URI(nodeURI);
                     String host = uri.getHost();
                     // if host or IP aren't set, then populate with correct IP
-                    if(StringUtils.isEmpty(host) || "[::]".equals(host) ||  "0.0.0.0".equalsIgnoreCase(host)){
+                    if (StringUtils.isEmpty(host) || "[::]".equals(host) || "0.0.0.0".equalsIgnoreCase(host)) {
 
                         try {
                             List<IP> ips = EEUtils.getAllIPs();
@@ -147,7 +148,7 @@ public class NodeServiceImpl implements NodeService, GethRpcConstants {
 
             throw ex;
 
-        } catch (NumberFormatException ex){
+        } catch (NumberFormatException ex) {
             LOG.error(ex.getMessage());
             throw new APIException(ex.getMessage());
 
@@ -162,55 +163,93 @@ public class NodeServiceImpl implements NodeService, GethRpcConstants {
     }
 
     @Override
-    public NodeConfig update(
-            Integer logLevel, Integer networkID, String identity, Boolean mining,
-            String extraParams, String genesisBlock) throws APIException {
+    public NodeConfig update(NodeSettings settings) throws APIException {
 
         boolean restart = false;
         boolean reset = false;
 
-        if (networkID != null && networkID != gethConfig.getNetworkId()) {
-            gethConfig.setNetworkId(networkID);
-            restart = true;
-        }
-
-        if (StringUtils.isNotEmpty(identity) && !identity.contentEquals(gethConfig.getIdentity())) {
-            gethConfig.setIdentity(identity);
-            restart = true;
-        }
-
-        if (logLevel != null && logLevel != gethConfig.getVerbosity()) {
-            gethConfig.setVerbosity(logLevel);
-            if (!restart) {
-                // make it live immediately
-                gethService.executeGethCall(ADMIN_VERBOSITY, new Object[]{ logLevel });
+        if (null != settings) {
+            if (settings.getNetworkId() != null && !settings.getNetworkId().equals(gethConfig.getNetworkId())) {
+                gethConfig.setNetworkId(settings.getNetworkId());
+                restart = true;
             }
-        }
 
-        String currExtraParams = gethConfig.getExtraParams();
-        if (extraParams != null && (currExtraParams == null || !extraParams.contentEquals(currExtraParams))) {
-            gethConfig.setExtraParams(extraParams);
-            restart = true;
-        }
-
-        try {
-            if (StringUtils.isNotBlank(genesisBlock) && !genesisBlock.contentEquals(gethConfig.getGenesisBlock())) {
-                gethConfig.setGenesisBlock(genesisBlock);
-                reset = true;
+            if (StringUtils.isNotEmpty(settings.getIdentity()) && !settings.getIdentity().contentEquals(gethConfig.getIdentity())) {
+                gethConfig.setIdentity(settings.getIdentity());
+                restart = true;
             }
-        } catch (IOException e) {
-            throw new APIException("Failed to update genesis block", e);
-        }
 
-        if (!quorumService.isQuorum() && mining != null && mining != gethConfig.isMining()) {
-            gethConfig.setMining(mining);
+            if (settings.getLogLevel() != null && !settings.getLogLevel().equals(gethConfig.getVerbosity())) {
+                gethConfig.setVerbosity(settings.getLogLevel());
+                if (!restart) {
+                    // make it live immediately
+                    gethService.executeGethCall(ADMIN_VERBOSITY, new Object[]{settings.getLogLevel()});
+                }
+            }
 
-            if (!restart) {
-                // make it live immediately
-                if (mining == true) {
-                    gethService.executeGethCall(ADMIN_MINER_START, "1");
-                } else {
-                    gethService.executeGethCall(ADMIN_MINER_STOP);
+            String currExtraParams = gethConfig.getExtraParams();
+            if (StringUtils.isNotBlank(settings.getExtraParams()) && (currExtraParams == null || !settings.getExtraParams().contentEquals(currExtraParams))) {
+                gethConfig.setExtraParams(settings.getExtraParams());
+                restart = true;
+            }
+
+            try {
+                if (StringUtils.isNotBlank(settings.getGenesisBlock()) && !settings.getGenesisBlock().contentEquals(gethConfig.getGenesisBlock())) {
+                    gethConfig.setGenesisBlock(settings.getGenesisBlock());
+                    reset = true;
+                }
+            } catch (IOException e) {
+                throw new APIException("Failed to update genesis block", e);
+            }
+
+            if (!quorumService.isQuorum() && settings.isMining() != null && !settings.isMining().equals(gethConfig.isMining())) {
+                gethConfig.setMining(settings.isMining());
+
+                if (!restart) {
+                    // make it live immediately
+                    if (settings.isMining()) {
+                        gethService.executeGethCall(ADMIN_MINER_START, "1");
+                    } else {
+                        gethService.executeGethCall(ADMIN_MINER_STOP);
+                    }
+                }
+            }
+
+            //Quorum specific settings
+            if (quorumService.isQuorum()) {
+                if (StringUtils.isNotBlank(settings.getBlockMakerAccount())
+                        && (StringUtils.isNotBlank(gethConfig.getBlockMaker()) && !settings.getBlockMakerAccount().contentEquals(gethConfig.getBlockMaker()))) {
+                    gethConfig.setBlockMaker(settings.getBlockMakerAccount());
+                    restart = true;
+                } else if (StringUtils.isNotBlank(settings.getBlockMakerAccount()) && StringUtils.isBlank(gethConfig.getBlockMaker())) {
+                    gethConfig.setBlockMaker(settings.getBlockMakerAccount());
+                    restart = true;
+                }
+
+                if (StringUtils.isNotBlank(settings.getVoterAccount()) && (StringUtils.isNotBlank(gethConfig.getVoteAccount()) && !settings.getVoterAccount().contentEquals(gethConfig.getVoteAccount()))) {
+                    gethConfig.setVoteAccount(settings.getVoterAccount());
+                    restart = true;
+                } else if (StringUtils.isNotBlank(settings.getVoterAccount()) && StringUtils.isBlank(gethConfig.getVoteAccount())) {
+                    gethConfig.setVoteAccount(settings.getVoterAccount());
+                    restart = true;
+                }
+
+                if (null != settings.getMinBlockTime()
+                        && (null != gethConfig.getMinBlockTime() && !settings.getMinBlockTime().equals(gethConfig.getMinBlockTime()))) {
+                    gethConfig.setMinBlockTime(settings.getMinBlockTime());
+                    restart = true;
+                } else if (null != settings.getMinBlockTime() && null == gethConfig.getMinBlockTime()) {
+                    gethConfig.setMinBlockTime(settings.getMinBlockTime());
+                    restart = true;
+                }
+
+                if (null != settings.getMaxBlockTime()
+                        && (null != gethConfig.getMaxBlockTime() && !settings.getMaxBlockTime().equals(gethConfig.getMaxBlockTime()))) {
+                    gethConfig.setMinBlockTime(settings.getMaxBlockTime());
+                    restart = true;
+                } else if (null != settings.getMaxBlockTime() && null == gethConfig.getMaxBlockTime()) {
+                    gethConfig.setMinBlockTime(settings.getMaxBlockTime());
+                    restart = true;
                 }
             }
         }
